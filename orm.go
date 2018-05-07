@@ -448,7 +448,11 @@ func selectByPK(c context.Context, tdx Tdx, s interface{}, pk interface{}) error
 	if pkName == "" {
 		return errors.New(tabName + " does not have primary key")
 	}
-	return selectOne(c, tdx, s, fmt.Sprintf("select * from %s where %s = ?", tabName, pkName), pk)
+	err := selectOne(c, tdx, s, fmt.Sprintf("select * from %s where %s = ?", tabName, pkName), pk)
+	if err != nil {
+		return fmt.Errorf("tableName:%s,%+v", tabName, err)
+	}
+	return nil
 }
 
 func selectOne(c context.Context, tdx Tdx, s interface{}, query string, args ...interface{}) error {
@@ -1007,6 +1011,12 @@ func columnsByStructFields(s interface{}, cols []string) ([]interface{}, reflect
 	//通过cols获取struct中的值
 	for _, value := range cols {
 		value = colName2FieldName(value)
+
+		// 字段不存在，panic
+		if !v.FieldByName(value).CanAddr() {
+
+			panic(fmt.Errorf("tableName:%s,field:%s doesn't exist", getTableName(s), value))
+		}
 		r := v.FieldByName(value).Addr().Interface()
 		if v.FieldByName(value).Type().String() == "time.Time" {
 			if r.(*time.Time).IsZero() {
@@ -1159,18 +1169,25 @@ func columnsBySlice(s []interface{}) (string, string, []interface{}, []reflect.V
 }
 
 func insert(c context.Context, tdx Tdx, s interface{}) error {
-	return insertByTable(c, tdx, getTableName(s), s)
+	tabName := getTableName(s)
+	err := insertByTable(c, tdx, tabName, s)
+	if err != nil {
+		return fmt.Errorf("tableName:%s,%+v", tabName, err)
+	}
+	return nil
 }
 
 func insertByTable(c context.Context, tdx Tdx, tableName string, s interface{}) error {
 	cols, vals, ifs, pk, isAi, _ := columnsByStruct(s)
 	ret, err := exec(c, tdx, fmt.Sprintf("insert into %s (%s) values(%s)", tableName, cols, vals), ifs...)
 	if err != nil {
+		err = fmt.Errorf("table_name:%s,%+v", tableName, err)
 		return err
 	}
 	if isAi {
 		lid, err := ret.LastInsertId()
 		if err != nil {
+			err = fmt.Errorf("table_name:%s,%+v", tableName, err)
 			return err
 		}
 		pk.SetInt(lid)
@@ -1196,11 +1213,13 @@ func insertOrUpdate(c context.Context, tdx Tdx, s interface{}, fields []string) 
 	q := fmt.Sprintf("insert into %s (%s) values (%s) on duplicate key update %s", getTableName(s), cols, vals, strings.Join(fields, ","))
 	ret, err := exec(c, tdx, q, ifs...)
 	if err != nil {
+		err = fmt.Errorf("table_name:%s,%+v", getTableName(s), err)
 		return err
 	}
 	if isAi {
 		lid, err := ret.LastInsertId()
 		if err != nil {
+			err = fmt.Errorf("table_name:%s,%+v", getTableName(s), err)
 			return err
 		}
 		pk.SetInt(lid)
@@ -1219,7 +1238,7 @@ func updateFieldsByPK(c context.Context, tdx Tdx, s interface{}, cols []string) 
 	q := fmt.Sprintf("update %s set %s where %s = %d", getTableName(s), sv, pkName, pk)
 	_, err := exec(c, tdx, q, ifs...)
 	if err != nil {
-		return err
+		return fmt.Errorf("tableName:%s,%+v", getTableName(s), err)
 	}
 	return nil
 }
@@ -1235,7 +1254,7 @@ func updateByPK(c context.Context, tdx Tdx, s interface{}) error {
 	q := fmt.Sprintf("update %s set %s where %s = %d", getTableName(s), sv, pkName, pk)
 	_, err := exec(c, tdx, q, ifs...)
 	if err != nil {
-		return err
+		return fmt.Errorf("tableName:%s,%+v", getTableName(s), err)
 	}
 	return nil
 }
@@ -1250,12 +1269,12 @@ func insertBatch(c context.Context, tdx Tdx, s []interface{}) error {
 	q := fmt.Sprintf("insert into %s %s values %s", getTableName(s[0]), cols, vals)
 	ret, err := exec(c, tdx, q, ifs...)
 	if err != nil {
-		return err
+		return fmt.Errorf("tableName:%s,%+v", getTableName(s), err)
 	}
 	//获取批量插入的last insert id, 然后给每个s[i]主键赋值
 	lastInsertId, err := ret.LastInsertId()
 	if err != nil {
-		return err
+		return fmt.Errorf("tableName:%s,%+v", getTableName(s), err)
 	}
 	for i, _ := range s {
 		if ais[i] {
