@@ -48,13 +48,27 @@ func addLimit(sql string, limitStatus int) string {
 	if ok, _ := regexp.MatchString(`(?i)limit|^(?i)show`, sql); ok {
 		return sql
 	}
+
 	sql = strings.TrimSuffix(sql, ";")
+	// 判断是否有for update
+	var selectOption bool
+	reg,_:=regexp.Compile(`(?i)for update`)
+	if ok:=reg.MatchString(sql);ok{
+		idx:=reg.FindIndex([]byte(sql))
+		subSql:=[]byte(sql)[:idx[0]]
+		sql=string(subSql)
+		selectOption=true
+	}
+
 	//最后一个匹配项
 	switch limitStatus {
 	case 0:
 		sql += " LIMIT 2000 "
 	case 1:
 		sql += " LIMIT 1 "
+	}
+	if selectOption{
+		sql=sql+" FOR UPDATE"
 	}
 	return sql
 }
